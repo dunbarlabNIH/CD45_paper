@@ -1,0 +1,1 @@
+The sample labeled as "26hm" for HAWX actually represents "27m." This discrepancy resulted from a miscalculation in the analysis date during the preparation of the master key.

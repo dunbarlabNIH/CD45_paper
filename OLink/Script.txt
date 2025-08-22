@@ -1,0 +1,109 @@
+# Load required libraries
+library(readxl)
+library(dplyr)
+library(writexl)
+library(pheatmap)
+
+# Step 1: Load the data from the Excel file (replace with your file path)
+data <- read_excel("~/Desktop/OLink_Row_data.xlsx")
+
+# Step 2: Extract the ULOQ replacement values from the first row (Specimen_code: ULOQ)
+uloq_values <- data %>%
+     filter(Specimen_code == "ULOQ") %>%
+     select(-Specimen_code)  # Exclude Specimen_code column
+
+# Remove the ULOQ row from the main data to work on the rest
+data <- data %>%
+     filter(Specimen_code != "ULOQ")
+
+# Step 3: Define the specimen codes (If needed include Busulfan animal by adding "H84D")
+specimen_codes <- c("13U013", "13U049", "DI8F", "L967", 
+                    "13U072", "AR-622", "H64K", "HAWX", "L689")
+
+# Function to replace "> ULOQ" with the corresponding value from the ULOQ row
+replace_ULOQ_with_values <- function(df, uloq_row) {
+     df %>%
+          mutate(across(everything(), ~ ifelse(. == "> ULOQ", as.numeric(uloq_row[[cur_column()]]), .)))
+}
+
+# Step 4: Filter rows, replace "> ULOQ", and apply Z-score scaling
+for (code in specimen_codes) {
+     # Filter rows where Specimen_code starts with the current code
+     filtered_data <- data %>%
+          filter(grepl(paste0("^", code), Specimen_code))
+     
+     # Replace "> ULOQ" with the corresponding ULOQ value from the extracted row
+     cleaned_data <- replace_ULOQ_with_values(filtered_data, uloq_values)
+     
+     # Ensure columns are numeric before scaling
+     numeric_cleaned_data <- cleaned_data %>%
+          mutate(across(!c(Specimen_code, Treatment, Date, Day, RUN), as.numeric))  # Explicitly convert to numeric
+     
+     # Apply Z-score scaling to numeric columns
+     scaled_data <- numeric_cleaned_data %>%
+          mutate(across(where(is.numeric), scale))  # Apply Z-score scaling
+     
+     # Create Specimen_code_Treatment_Day for the heatmap
+     scaled_data <- scaled_data %>%
+          mutate(Specimen_code_Treatment_Day = paste(Specimen_code, Treatment, Day, sep = "_"))
+     
+     # Define the output file name
+     file_name <- paste0("scaled_filtered_", code, ".xlsx")
+     
+     # Save the scaled data to an Excel file
+     write_xlsx(scaled_data, path = file_name)
+}
+
+# Output message
+print("Filtered, cleaned, and Z-score scaled data with Specimen_code_Treatment_Day has been saved to separate Excel files.")
+
+
+# Step 1: List all scaled files (make sure your working directory is set correctly)
+file_list <- list.files(pattern = "scaled_filtered_.*\\.xlsx")
+
+# Initialize an empty dataframe to store all combined data
+combined_data <- data.frame()
+
+# Step 2: Loop through the files and combine the data
+for (file in file_list) {
+     # Load each scaled filtered dataset
+     temp_data <- read_excel(file)
+     
+     # Combine the data
+     combined_data <- bind_rows(combined_data, temp_data)
+}
+
+# Step 3: Save the combined data into a single Excel file
+#write_xlsx(combined_data, "All_animals_scaled_individually.xlsx")
+
+# Load necessary libraries
+df <- combined_data
+
+# Create a unique identifier for each row
+df$row_id <- paste(df$Treatment, df$Specimen_code, df$Day, sep = "_")
+
+# Check for duplicates and make row_id unique if needed
+if(any(duplicated(df$row_id))) {
+     df$row_id <- make.unique(df$row_id)
+     warning("Duplicate row names were found and have been made unique.")
+}
+
+# Select only numeric columns
+numeric_df <- df[sapply(df, is.numeric)]
+
+# Exclude specific columns (Specimen_code, Treatment, Date, row_id)
+exclude_columns <- c("Specimen_code", "Treatment", "Batch", "Date", "row_id", "ADC batch")
+numeric_df <- numeric_df[, !(names(numeric_df) %in% exclude_columns)]
+
+# Convert numeric_df to a traditional data frame before setting row names
+numeric_df <- as.data.frame(numeric_df)
+
+# Add the unique row identifier as row names
+rownames(numeric_df) <- df$row_id
+
+# Remove rows with any NA values
+numeric_df <- na.omit(numeric_df)
+
+# Generate heatmap without clustering
+set.seed(123)
+pheatmap(numeric_df, cluster_rows = TRUE, cluster_cols = TRUE)
